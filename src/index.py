@@ -24,6 +24,10 @@ load_dotenv(PROJECT_ROOT / ".env")
 FALLBACK_EMAILS_DIR = PROJECT_ROOT / "Emails"
 FALLBACK_DB_PATH = str(PROJECT_ROOT / "data" / "mailing.db")
 
+_MODULE_INIT_ERROR = None
+EMAILS_DIR = FALLBACK_EMAILS_DIR
+DB_PATH = FALLBACK_DB_PATH
+
 
 def _load_streamlit_secrets_into_os_environ() -> None:
     """
@@ -46,9 +50,6 @@ def _load_streamlit_secrets_into_os_environ() -> None:
                 os.environ.setdefault(key, str(value))
         except Exception:
             continue
-
-
-_load_streamlit_secrets_into_os_environ()
 
 
 def _safe_warn_once(key: str, message: str) -> None:
@@ -120,8 +121,16 @@ def _resolve_db_path() -> str:
         return FALLBACK_DB_PATH
 
 
-EMAILS_DIR = _resolve_env_dir("EMAILS_DIR", FALLBACK_EMAILS_DIR, "Emails")
-DB_PATH = _resolve_db_path()
+# Only AFTER all helper definitions: run init logic. Any failure is captured
+# (so streamlit still gets to main()) and surfaced as an error banner there.
+try:
+    _load_streamlit_secrets_into_os_environ()
+    EMAILS_DIR = _resolve_env_dir("EMAILS_DIR", FALLBACK_EMAILS_DIR, "Emails")
+    DB_PATH = _resolve_db_path()
+except Exception as _e:
+    _MODULE_INIT_ERROR = _e
+    EMAILS_DIR = FALLBACK_EMAILS_DIR
+    DB_PATH = FALLBACK_DB_PATH
 PRIORITY_LABELS = {
     1: "1 Immediate Attention",
     2: "2 Action / Decision Required Today",
@@ -218,14 +227,53 @@ def render_upload(conn):
     # Demo convenience only — still calls ingest.run_ingest(), so
     # Ingest remains the only thing that ever parses a file.
     with st.expander("Upload new .msg files (demo only)"):
-        uploaded = st.file_uploader("Drop .msg files here", type="msg", accept_multiple_files=True)
-        if uploaded and st.button("Ingest uploaded files"):
+        uploaded = st.file_uploader(
+            "Drop .msg files here",
+            type="msg",
+            accept_multiple_files=True,
+            key="upload_new_msg",
+        )
+
+        def _do_ingest():
+            files = st.session_state.get("upload_new_msg") or []
+            if not files:
+                st.session_state.setdefault("toast_warning", "No files were selected.")
+                return
             EMAILS_DIR.mkdir(parents=True, exist_ok=True)
-            for f in uploaded:
-                (EMAILS_DIR / f.name).write_bytes(f.getvalue())
-            result = ingest.run_ingest(str(EMAILS_DIR), DB_PATH)
-            st.success(f"Ingested: {result}")
-            st.rerun()
+            written = []
+            for f in files:
+                target = EMAILS_DIR / f.name
+                target.write_bytes(f.getvalue())
+                written.append(str(target))
+            try:
+                result = ingest.run_ingest(str(EMAILS_DIR), DB_PATH)
+            except Exception as e:
+                st.session_state["toast_error"] = f"Ingest failed: {type(e).__name__}: {e}"
+                return
+            st.session_state["toast_success"] = f"Ingested {len(written)} file(s): {result}"
+            # Force refresh of the DB connection after write
+            get_conn.clear()
+
+        st.button(
+            "Ingest uploaded files",
+            key="ingest_uploaded_btn",
+            on_click=_do_ingest,
+            type="primary",
+            disabled=not uploaded,
+        )
+
+
+def _render_pending_toasts() -> None:
+    """Render one-shot toasts stored in session_state (survive a st.rerun())."""
+    for key, kind in (
+        ("toast_success", "success"),
+        ("toast_warning", "warning"),
+        ("toast_error", "error"),
+    ):
+        msg = st.session_state.pop(key, None)
+        if msg:
+            fn = getattr(st, kind)
+            fn(msg)
 
 
 def _coerce(field: str, value):
@@ -411,12 +459,22 @@ def render_thread(conn, thread_id):
                 "quote": evidence_quote, "start_offset": matched_start, "end_offset": end,
             })
         conn.commit()
-        st.success("Correction saved.")
+        st.session_state["toast_success"] = "Correction saved."
         st.rerun()
 
 
 def main():
     st.set_page_config(page_title="Executive Email Intelligence", layout="wide")
+    _render_pending_toasts()
+    if _MODULE_INIT_ERROR is not None:
+        st.exception(_MODULE_INIT_ERROR)
+        st.error(
+            "Something failed during app startup (see traceback above). "
+            "This is usually caused by environment variables / Secrets not "
+            "being loaded correctly. Reload after fixing to retry.",
+            icon="🚨",
+        )
+        st.stop()
     conn = get_conn()
     if "selected_thread_id" not in st.session_state:
         st.session_state.selected_thread_id = None
