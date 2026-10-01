@@ -347,6 +347,13 @@ def render_queue(conn):
     for e in rows["unreadable"]:
         st.write(f"- {e['filename']}: {e['error']}")
 
+    if rows["unjudged"]:
+        st.subheader("Not yet judged")
+        for e in rows["unjudged"]:
+            if st.button(e["subject"], key=f"q_{e['thread']['id']}"):
+                st.session_state.selected_thread_id = e["thread"]["id"]
+                st.rerun()
+
 
 def render_thread(conn, thread_id):
     thread = store.get_thread(conn, thread_id)
