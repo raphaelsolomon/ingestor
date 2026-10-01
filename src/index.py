@@ -25,6 +25,45 @@ FALLBACK_EMAILS_DIR = PROJECT_ROOT / "Emails"
 FALLBACK_DB_PATH = str(PROJECT_ROOT / "data" / "mailing.db")
 
 
+def _load_streamlit_secrets_into_os_environ() -> None:
+    """
+    Streamlit Community Cloud stores secrets in st.secrets (TOML) rather than
+    shell environment variables. Copy them into os.environ so the existing
+    os.getenv(...) fallbacks in ingest/judge/llm_client keep working.
+    Only runs when streamlit is actually in a running context (has st.secrets).
+    """
+    try:
+        secrets = st.secrets
+    except Exception:
+        return
+    for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_BASE_URL",
+                "DB_PATH", "EMAILS_DIR", "MODEL_ENDPOINT_APPROVED"):
+        try:
+            if key in secrets:
+                value = secrets[key]
+                if value is None:
+                    continue
+                os.environ.setdefault(key, str(value))
+        except Exception:
+            continue
+
+
+_load_streamlit_secrets_into_os_environ()
+
+
+def _safe_warn_once(key: str, message: str) -> None:
+    """Show a st.warning exactly once per session; gracefully skips if
+    st.session_state is not yet available (module-import-time code paths)."""
+    try:
+        state = st.session_state
+    except Exception:
+        return
+    flag = f"_warned_{key}"
+    if not state.get(flag):
+        st.warning(message)
+        state[flag] = True
+
+
 def _resolve_env_dir(env_name: str, fallback: Path, warn_label: str) -> Path:
     """
     Try to use a directory path from .env. If the env var is not set,
@@ -54,14 +93,11 @@ def _resolve_env_dir(env_name: str, fallback: Path, warn_label: str) -> Path:
             raise PermissionError(f"write probe failed: {e}") from e
         return p
     except (OSError, ValueError) as e:
-        # Warn once per session so every page rerender doesn't spam
-        st.session_state.setdefault(f"_warned_{env_name}", False)
-        if not st.session_state[f"_warned_{env_name}"]:
-            st.warning(
-                f"{warn_label} path {env_name}={raw!r} is not usable here "
-                f"({type(e).__name__}: {e}). Falling back to {fallback}."
-            )
-            st.session_state[f"_warned_{env_name}"] = True
+        _safe_warn_once(
+            env_name,
+            f"{warn_label} path {env_name}={raw!r} is not usable here "
+            f"({type(e).__name__}: {e}). Falling back to {fallback}.",
+        )
         return fallback
 
 
@@ -76,13 +112,11 @@ def _resolve_db_path() -> str:
         candidate.parent.mkdir(parents=True, exist_ok=True)
         return str(candidate)
     except OSError as e:
-        st.session_state.setdefault("_warned_DB_PATH", False)
-        if not st.session_state["_warned_DB_PATH"]:
-            st.warning(
-                f"DB_PATH={raw!r} parent dir is not usable here "
-                f"({type(e).__name__}: {e}). Falling back to {FALLBACK_DB_PATH}."
-            )
-            st.session_state["_warned_DB_PATH"] = True
+        _safe_warn_once(
+            "DB_PATH",
+            f"DB_PATH={raw!r} parent dir is not usable here "
+            f"({type(e).__name__}: {e}). Falling back to {FALLBACK_DB_PATH}.",
+        )
         return FALLBACK_DB_PATH
 
 
