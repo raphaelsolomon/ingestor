@@ -1,8 +1,11 @@
 """
 index.py — the human-facing Streamlit review app. Wraps everything
 ingest.py, judge.py, store.py, and export_evalutation.py already built.
-It reads the same database and writes corrections only. No parsing,
-no model calls here.
+It reads the same database and writes corrections. Parsing only ever
+happens in ingest.py; the one deliberate exception is the "Run Judge
+now" demo button below, which calls judge.py directly so a reviewer
+can trigger a judge pass without leaving the browser — the same call
+app.py already makes from the CLI, just reachable from the UI too.
 """
 
 import hashlib
@@ -16,6 +19,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 import ingest
+import judge
 import store
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -260,6 +264,23 @@ def render_upload(conn):
             on_click=_do_ingest,
             type="primary",
             disabled=not uploaded,
+        )
+
+        def _do_judge():
+            model = os.getenv("ANTHROPIC_MODEL", "MiniMax-M3")
+            try:
+                result = judge.run_judge(DB_PATH, model)
+            except Exception as e:
+                st.session_state["toast_error"] = f"Judge failed: {type(e).__name__}: {e}"
+                return
+            st.session_state["toast_success"] = f"Judge run: {result}"
+            get_conn.clear()
+
+        st.caption("Judges every thread still waiting in \"Not yet judged\", not just the one above.")
+        st.button(
+            "Run Judge now",
+            key="run_judge_btn",
+            on_click=_do_judge,
         )
 
 
