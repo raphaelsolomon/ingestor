@@ -1,0 +1,4 @@
+# System libraries for parsing Outlook .msg files (OLE2 + compressed RTF).
+# extract-msg has pure-Python fallbacks, but libolecf is provided as a
+# belt-and-suspenders measure for any edge-case the bundled parser hits.
+libolecf-utils

@@ -1,0 +1,29 @@
+# --- Python env ---
+.venv/
+venv/
+ENV/
+__pycache__/
+*.pyc
+*.pyo
+
+# --- secrets: NEVER commit these ---
+.env
+.env.*
+!.env.example
+
+# --- local data + SQLite: large, machine-specific, contains emails ---
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.jsonl
+Emails/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Streamlit tempfiles ---
+.streamlit/secrets.toml

@@ -1,0 +1,18 @@
+[server]
+mainScriptPath = "src/index.py"
+port = 8501
+address = "0.0.0.0"
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#FF6B6B"
+backgroundColor = "#141414"
+secondaryBackgroundColor = "#1E1E1E"
+textColor = "#E8E8E8"
+font = "sans serif"
+
+[runner]
+magicEnabled = false
